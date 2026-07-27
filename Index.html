@@ -1,0 +1,664 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador de Task Board Automatizado</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
+    <style>
+        body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 5px; background: #48101E; font-size: 16px; color: #333; transition: background 0.4s ease; }
+        body.task-loaded { background: #0F3D24; }
+        body.task-loaded .setup-box { background: #14532d; transition: background 0.4s ease; }
+        body.task-loaded .form-group input:not([readonly]), body.task-loaded .form-group select { background: #e3f7e8; color: #14532d; transition: background 0.4s ease; }
+        body.task-loaded .form-group input[readonly] { background: #cfeed9 !important; color: #14532d !important; }
+        
+        .setup-box { background: #263238; color: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .setup-box h2 { margin: 0 0 15px 0; font-size: 24px; color: #ffb300; text-align: center; }
+        
+        .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+        .form-group { display: flex; flex-direction: column; }
+        .form-group.full-width { grid-column: 1 / -1; }
+        .form-group label { font-size: 13px; margin-bottom: 5px; text-transform: uppercase; color: #d0dee5; font-weight: bold; }
+        .form-group input, .form-group select { padding: 12px; border-radius: 6px; border: none; font-size: 16px; font-weight: bold; color: #A03238; background: #ffffff; box-sizing: border-box; width: 100%; }
+        
+        .form-group select { cursor: pointer; -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url("data:image/svg+xml;utf8,<svg fill='%23A03238' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>"); background-repeat: no-repeat; background-position-x: 96%; background-position-y: 50%; }
+
+        .btn-api { background: #0091ea; color: white; font-weight: bold; padding: 12px; border: none; border-radius: 6px; cursor: pointer; font-size: 16px; text-transform: uppercase; flex: 1; }
+        .btn-api:disabled { background: #607d8b; cursor: not-allowed; }
+        .btn-cargar { background: #ffb300; color: #A03238; font-weight: bold; padding: 15px; border: none; border-radius: 6px; cursor: pointer; margin-top: 15px; width: 100%; font-size: 22px; text-align: center; text-transform: uppercase; grid-column: 1 / -1; }
+
+        .board-container { display: none; max-width: 800px; margin: 0 auto; background: #000; padding: 5px; border-radius: 10px; box-shadow: 0 10px 12px rgba(0,0,0,0.08); }
+        .header-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+        .header-table td { border: 2px solid #b0bec5; padding: 8px 12px; font-weight: bold; vertical-align: middle; background: #FfFfFf; }
+        .title-main { font-size: 24px; color: #b71c1c; text-align: center; font-weight: 900; }
+
+        .times-table td:nth-child(1), .times-table td:nth-child(2) { background: #eceff1; border: 2px solid #90a4ae; }
+        .times-table td:nth-child(3), .times-table td:nth-child(4) { background: #fdf3e3; border: 2px solid #b71c1c; }
+        
+        .turn-cell { text-align: center; background: #e3f2fd !important; padding: 4px !important; }
+        .turn-graphic-container { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 85px; }
+        .turn-image-box { position: relative; width: 140px; height: 60px; display: flex; align-items: center; justify-content: center; }
+        .turn-image-box img { width: 100%; height: 100%; object-fit: contain; }
+        .turn-text-overlay { position: absolute; font-size: 18px; font-weight: 900; color: #1565c0; text-shadow: 1px 1px 0px #fff, -1px -1px 0px #fff, 1px -1px 0px #fff, -1px 1px 0px #fff; }
+        
+        .time-label { font-size: 10px; color: #555; font-weight: normal; text-transform: uppercase; display: block; margin-bottom: 2px; }
+        .time-value { font-size: 16px; font-weight: bold; color: #222; }
+
+        table.task-table { width: 100%; border-collapse: collapse; margin-top: 5px; margin-bottom: 5px; border: 2px solid #A03238; border-radius: 6px; overflow: hidden; }
+        table.task-table th { background: #A03238; color: #fff; padding: 7px 8px; font-size: 14px; text-transform: uppercase; text-align: left; }
+        table.task-table td { padding: 7px 8px; border-bottom: 1px solid #d7dde0; font-size: 17px; vertical-align: middle; }
+        table.task-table tbody tr { background-color: #ffffff; }
+        table.task-table tbody tr:nth-child(even) { background-color: #f4f6f7; }
+
+        tr.fila-sss td.desc-cell, tr.fila-ess td.desc-cell { color: #1b7d0f; font-weight: 800;}
+        tr.fila-goal td.desc-cell { color: #c62828; font-weight: 800; }
+        .desc-cell { font-size: 18px; font-weight: 800; }
+
+        .bold-cell { font-weight: bold; }
+        .text-blue2 { color: #0000dd; font-size: 15px ; font-weight: bold }
+        .text-blue { color: #1976d2; font-size: 12px; background: #e1f5fe; padding: 2px 5px; border-radius: 4px; font-weight: bold; display: inline-block; margin-top: 4px; text-transform: uppercase; border: 1px solid #1976d2; }
+		
+        .badge-tp { font-size: 11px; padding: 2px 4px; border-radius: 4px; margin-left: 4px; color: white; font-weight: bold; display: inline-block; border: 1px solid #101010; }
+        .badge-hora { font-size: 11px; padding: 2px 4px; border-radius: 4px; margin-left: 4px; color: #333; font-weight: 900; display: inline-block; background: #fff3cd; border: 2px solid #e0a800; }
+        .bg-takeoff { background: #eceff1; color: #607d8b; border: 1px solid #b0bec5; font-weight: 700; }
+        .bg-sss { background-color: #2abb12; }
+        .bg-ess { background-color: #f57c00; }
+        .bg-goal { background-color: #c62828; }
+
+        .map-static-container { width: 100%; margin-top: 5px; border: 2px solid #b0bec5; border-radius: 6px; overflow: hidden; background: #333; }
+        .map-static-container img { width: 100%; height: auto; display: block; }
+
+        .qr-container { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; background: #fff; border: 2px solid #b0bec5; border-radius: 6px; padding: 14px; }
+        .qr-container img { width: 42%; max-width: 220px; min-width: 140px; height: auto; aspect-ratio: 1 / 1; flex-shrink: 0; }
+        .qr-container .qr-text { font-size: 15px; color: #455a64; font-weight: bold; text-transform: uppercase; line-height: 1.4; }
+        .qr-container.qr-hidden { display: none; }
+        
+        .footer-info { border: 2px solid #b0bec5; padding: 12px; background: #fffde7; border-radius: 6px; }
+        .footer-grid { display: flex; flex-direction: column; font-weight: bold; gap: 12px; }
+        .footer-contacts { font-size: 16px; display: flex; flex-direction: column; gap: 5px; }
+        
+        .dist-container { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        .total-dist-box { border: 2px solid #b0bec5; background: white; padding: 8px; border-radius: 6px; text-align: center; }
+        .total-dist-box .dist-value { font-size: 24px; font-weight: 900; display: block; margin-top: 2px; }
+        .dist-label { font-size: 11px; color: #455a64; font-weight: bold; text-transform: uppercase; }
+        
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px;}
+        .btn-whatsapp { background: #25D366; color: white; text-align: center; padding: 20px; border: none; border-radius: 6px; font-weight: bold; font-size: 16px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-transform: uppercase;}
+        .btn-capture { background: #0288d1; color: white; text-align: center; padding: 20px; border: none; border-radius: 6px; font-weight: bold; font-size: 16px; cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-transform: uppercase;}
+    </style>
+</head>
+<body>
+
+    <div class="setup-box" id="setupSection">
+        <h2>CONFIGURACIÓ DE LA MÀNIGA</h2>
+        <div class="form-grid">
+            <div class="form-group full-width">
+                <label>Codi Task XContest</label>
+                <div style="display:flex; gap:8px;">
+                    <input type="text" id="taskCodeInput" placeholder="Ex: puti, zixe..." value="zebi" style="flex:2;">
+                    <button id="btnBuscar" class="btn-api" onclick="buscarDatosTask()">🔍 Buscar Dades</button>
+                </div>
+            </div>
+            <div class="form-group">
+                <label>Selecció de Lliga</label>
+                <select id="ligaInput">
+                    <option value="" selected disabled>-- Selecciona una lliga --</option>
+                    <option value="LLIGA A">LLIGA A</option>
+                    <option value="LLIGA B">LLIGA B</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Frequència Seguretat (MHz)</label>
+                <input type="text" id="freqInput" value="143.700">
+            </div>
+            
+            <div class="form-group full-width">
+                <label>LAUNCH SITE / ENVOL (Autocompletat)</label>
+                <input type="text" id="launchSiteInput" placeholder="Fes clic a 'Buscar Dades'..." readonly style="background:#e0e0e0; color:#555;">
+            </div>
+            
+            <div class="form-group">
+                <label>Telèfon Recollides</label>
+                <select id="recInput">
+                    <option value="617 213 625 (Miquel)">617 213 625 (Miquel)</option>
+                    <option value="619 93 23 97 (Edy)">619 93 23 97 (Edy)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Telèfon EMERGÈNCIES</label>
+                <select id="emeInput">
+                    <option value="630 28 20 26 (Jesús)">630 28 20 26 (Jesús)</option>
+                    <option value="619 93 23 97 (Edy)">619 93 23 97 (Edy)</option>
+                    <option value="689 90 72 68 (Alba)">689 90 72 68 (Alba)</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Apertura Finestra</label>
+                <input type="text" id="windowOpenInput" value="12:00">
+            </div>
+            <div class="form-group">
+                <label>Tancament Finestra</label>
+                <input type="text" id="windowCloseInput" value="14:00">
+            </div>
+            <div class="form-group">
+                <label>Hora START (SSS)</label>
+                <input type="text" id="startInput" value="13:30">
+            </div>
+            <div class="form-group">
+                <label>Hora FINAL (ESS)</label>
+                <input type="text" id="deadlineInput" value="18:00">
+            </div>
+            
+            <button class="btn-cargar" onclick="generarTaulerGrafic()">⚡ Generar Tauler Gràfic</button>
+        </div>
+    </div>
+
+    <div class="board-container" id="boardSection">
+        <div id="captureArea" style="background: #252525; padding: 10px; border-radius: 6px;">
+            <table class="header-table">
+                <tr>
+                    <td class="title-main" style="width:65%; border-bottom: none;" id="lblTaskTitle">TASK --/--/----</td>
+                    <td rowspan="3" class="turn-cell" style="width:35%;">
+                        <div class="turn-graphic-container">
+                            <span style="font-size: 10px; color: #555; font-weight: normal; margin-bottom: 2px;">GIR</span>
+                            <div class="turn-image-box">
+                                <img id="imgTurnGraphic" src="" alt="GIR">
+                                <span class="turn-text-overlay" id="lblTurnText">DRETA</span>
+                            </div>
+                        </div>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="text-align:center; padding: 4px; border-top: 1px solid #b0bec5; border-bottom: 2px solid #b0bec5;">
+                        <span id="lblCodiTask" style="font-size:18px; font-weight:900; color:#b71c1c; text-transform: uppercase; letter-spacing: 1px;"></span>
+                    </td>
+                </tr>
+                <tr>
+                    <td>
+                        <span class="time-label">LAUNCH SITE (ENVOL):</span>
+                        <span style="color:#2e7d32; font-size:15px; font-weight: bold;" id="lblLaunch">--</span>
+                    </td>
+                </tr>
+            </table>
+
+            <table class="header-table times-table">
+                <tr>
+                    <td style="width:25%;">
+                        <span class="time-label">WINDOW OPEN:</span>
+                        <span class="time-value" id="lblWinOpen">00:00</span>
+                    </td>
+                    <td style="width:25%;">
+                        <span class="time-label">WINDOW CLOSE:</span>
+                        <span class="time-value" id="lblWinClose">00:00</span>
+                    </td>
+                    <td style="width:25%;">
+                        <span class="time-label">HORA START [SSS]:</span>
+                        <span class="time-value" id="lblStart" style="color:#1A1AE7;">00:00</span>
+                    </td>
+                    <td style="width:25%;">
+                        <span class="time-label">TANCAMENT [ESS]:</span>
+                        <span class="time-value" id="lblDeadline" style="color:#b71c1c;">00:00</span>
+                    </td>
+                </tr>
+            </table>
+            
+            <table class="task-table" id="taskTable">
+                <thead>
+                    <tr>
+                        <th style="width:30%;">TP</th>
+                        <th style="width:50%;">Balisa (Nom)</th>
+                        <th style="width:20%;">Radi</th>
+                    </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+
+            <div class="footer-info">
+                <div class="footer-grid">
+                    <div class="footer-contacts">
+                        <div style="color:#0d47a1;" id="outFreq">📡 FREQ. SEGURETAT: --</div>
+                        <div style="color:#A03238;" id="outRec">🛻 TEL. RECOLLIDES: --</div>
+                        <div style="color:#b71c1c;" id="outEme">🚨 EMERGÈNCIES: --</div>
+                    </div>
+                    <div class="dist-container">
+                        <div class="total-dist-box">
+                            <span class="dist-label">Optimitzada</span>
+                            <span class="dist-value" style="color:#b71c1c;"><span id="lblTotalDist">0.0</span> km</span>
+                        </div>
+                        <div class="total-dist-box">
+                            <span class="dist-label">Pels centres</span>
+                            <span class="dist-value" style="color:#455a64;"><span id="lblCenterDist">0.0</span> km</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="map-static-container">
+                <img id="staticMapImg" src="" alt="Mapa de la Task" crossorigin="anonymous">
+            </div>
+
+            <div class="qr-container qr-hidden" id="qrContainer">
+                <img id="qrCodeImg" src="" alt="QR Task">
+                <span class="qr-text">Escaneja per<br>carregar a XCTrack</span>
+            </div>
+        </div>
+        
+        <div class="btn-group">
+            <button class="btn-capture" id="btnCap" onclick="descargarImagen()">📸 Guardar Foto</button>
+            <button class="btn-whatsapp" id="btnWA" onclick="compartirImagenWhatsApp()">📲 Compartir Tauler</button>
+        </div>
+    </div>
+
+    <script>
+        let nombreArchivoGlobal = "";
+        let taskDataGlobal = null;
+        let horaOriginalStart = null;
+        let horaOriginalDeadline = null;
+
+        // ⚠️ Sustituye esta URL por la de tu propio Cloudflare Worker una vez desplegado
+        // (ver instrucciones en xctsk-proxy-worker.js). Déjalo vacío ("") si aún no lo tienes.
+        const PROXY_PROPIO = "https://xctsk-proxy.trackslligacatalana.workers.dev";
+
+        // --- CÁLCULO MATEMÁTICO INVISIBLE ---
+        // Estas funciones no imprimen columnas nuevas, simplemente calculan el total final
+        function distanciaHaver(lat1, lon1, lat2, lon2) {
+            const R = 6371;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                      Math.sin(dLon/2) * Math.sin(dLon/2);
+            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
+        }
+
+        function calculoRumbo(lat1, lon1, lat2, lon2) {
+            let dLon = (lon2 - lon1) * Math.PI / 180;
+            let rLat1 = lat1 * Math.PI / 180;
+            let rLat2 = lat2 * Math.PI / 180;
+            return Math.atan2(Math.sin(dLon) * Math.cos(rLat2), Math.cos(rLat1) * Math.sin(rLat2) - Math.sin(rLat1) * Math.cos(rLat2) * Math.cos(dLon));
+        }
+
+        function puntoInterseccion(lat, lon, radioM, rumbo) {
+            let deltaLat = (radioM * Math.cos(rumbo)) / 111111.0;
+            let deltaLon = (radioM * Math.sin(rumbo)) / (111111.0 * Math.cos(lat * Math.PI / 180));
+            return [lat + deltaLat, lon + deltaLon];
+        }
+
+        // --- CONVERSIÓN UTC <-> HORA LOCAL ---
+        // Los tiempos del .xctsk (timeGates / deadline) vienen en UTC ("13:30:00Z").
+        // Los mostramos en hora local del piloto para que no haya confusiones.
+        // Cambia este valor si algún día cambia el huso horario (p.ej. horario de invierno = 1).
+        const TZ_OFFSET_HOURS = 2;
+
+        function hhmmSumarHoras(hhmm, horas) {
+            if (!hhmm || hhmm.length < 4) return hhmm;
+            let [h, m] = hhmm.split(':').map(Number);
+            let totalMin = ((h * 60 + m) + horas * 60 + 24 * 60) % (24 * 60);
+            let hh = String(Math.floor(totalMin / 60)).padStart(2, '0');
+            let mm = String(totalMin % 60).padStart(2, '0');
+            return `${hh}:${mm}`;
+        }
+
+        function utcAlocal(hhmm) {
+            return hhmmSumarHoras(hhmm, TZ_OFFSET_HOURS);
+        }
+
+        function localAutc(hhmm) {
+            return hhmmSumarHoras(hhmm, -TZ_OFFSET_HOURS);
+        }
+
+        // --- ACTUALIZACIÓN DE HORAS PARA EL QR ---
+        // Sustituye solo los 5 primeros caracteres (HH:MM) del string ISO original,
+        // conservando segundos/zona horaria tal cual venían del servidor (ej: "13:30:00Z").
+        // nuevaHHMM debe venir ya en UTC (usar localAutc() antes de llamar si el valor es local).
+        function actualizarHora(original, nuevaHHMM) {
+            if (!nuevaHHMM || nuevaHHMM.length < 4) return original;
+            if (!original) return `${nuevaHHMM}:00Z`;
+            return `${nuevaHHMM}${original.substring(5)}`;
+        }
+
+        function construirTaskActualizado() {
+            if (!taskDataGlobal) return null;
+            // Clonamos para no tocar el original (por si se vuelve a pulsar "Generar")
+            let taskClone = JSON.parse(JSON.stringify(taskDataGlobal));
+
+            // Los inputs están en hora LOCAL; los convertimos a UTC antes de escribirlos en el JSON del task.
+            const nuevaStart = localAutc(document.getElementById('startInput').value.trim());
+            const nuevaDeadline = localAutc(document.getElementById('deadlineInput').value.trim());
+
+            if (taskClone.sss && Array.isArray(taskClone.sss.timeGates) && taskClone.sss.timeGates.length > 0) {
+                taskClone.sss.timeGates[0] = actualizarHora(taskClone.sss.timeGates[0], nuevaStart);
+            }
+            if (taskClone.goal) {
+                taskClone.goal.deadline = actualizarHora(taskClone.goal.deadline, nuevaDeadline);
+            }
+
+            return taskClone;
+        }
+
+        // POST /api/xctsk/qr con el JSON de la tarea (con horas ya modificadas).
+        // Devuelve un SVG; lo convertimos en blob URL para pintarlo en <img> y
+        // que quede también capturado por html2canvas (al ser mismo origen, sin problema CORS).
+        async function generarQRCode(taskJson) {
+            const qrContainer = document.getElementById('qrContainer');
+            const qrImg = document.getElementById('qrCodeImg');
+            const targetUrl = 'https://tools.xcontest.org/api/xctsk/qr';
+            const bodyStr = JSON.stringify(taskJson);
+
+            const intentos = [];
+            if (PROXY_PROPIO && !PROXY_PROPIO.includes('TU-USUARIO')) {
+                intentos.push({ nombre: 'proxy propi', url: `${PROXY_PROPIO}/?url=${encodeURIComponent(targetUrl)}` });
+            }
+            intentos.push(
+                { nombre: 'directe', url: targetUrl },
+                { nombre: 'corsproxy.io', url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}` },
+                { nombre: 'thingproxy', url: `https://thingproxy.freeboard.io/fetch/${targetUrl}` }
+            );
+
+            for (let i = 0; i < intentos.length; i++) {
+                try {
+                    const controlador = new AbortController();
+                    const timeoutId = setTimeout(() => controlador.abort(), 8000);
+                    const response = await fetch(intentos[i].url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: bodyStr,
+                        signal: controlador.signal
+                    });
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) continue;
+                    const svgText = await response.text();
+                    if (!svgText.includes('<svg')) continue;
+
+                    const svgBlob = new Blob([svgText], { type: 'image/svg+xml' });
+                    qrImg.src = URL.createObjectURL(svgBlob);
+                    qrContainer.classList.remove('qr-hidden');
+                    return true;
+                } catch (err) {
+                    console.warn(`QR (${intentos[i].nombre}) ha fallat:`, err);
+                }
+            }
+
+            console.error('No s\'ha pogut generar el QR amb cap dels mètodes provats.');
+            qrContainer.classList.add('qr-hidden');
+            return false;
+        }
+
+        async function buscarDatosTask() {
+            const code = document.getElementById('taskCodeInput').value.trim().toLowerCase();
+            if (!code || code.length < 3) {
+                alert("Si us plau, introdueix un codi de task vàlid.");
+                return;
+            }
+
+            const ligaSel = document.getElementById('ligaInput');
+            if (!ligaSel.value) {
+                alert("Si us plau, selecciona primer una Lliga.");
+                ligaSel.focus();
+                return;
+            }
+
+            let btn = document.getElementById('btnBuscar');
+            btn.disabled = true;
+
+            const targetUrl = `https://tools.xcontest.org/api/xctsk/load/${code}`;
+            const intentos = [];
+            if (PROXY_PROPIO && !PROXY_PROPIO.includes('TU-USUARIO')) {
+                intentos.push({ nombre: 'proxy propi', url: `${PROXY_PROPIO}/?url=${encodeURIComponent(targetUrl)}` });
+            }
+            intentos.push(
+                { nombre: 'directe', url: targetUrl },
+                { nombre: 'corsproxy.io', url: `https://corsproxy.io/?url=${encodeURIComponent(targetUrl)}` },
+                { nombre: 'thingproxy', url: `https://thingproxy.freeboard.io/fetch/${targetUrl}` },
+                { nombre: 'allorigins', url: `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}` }
+            );
+
+            let task = null;
+            let errores = [];
+
+            for (let i = 0; i < intentos.length; i++) {
+                btn.innerText = `⏳ Provant ${intentos[i].nombre}...`;
+                try {
+                    const controlador = new AbortController();
+                    const timeoutId = setTimeout(() => controlador.abort(), 6000);
+                    const response = await fetch(intentos[i].url, { signal: controlador.signal });
+                    clearTimeout(timeoutId);
+
+                    if (!response.ok) {
+                        errores.push(`${intentos[i].nombre}: HTTP ${response.status}`);
+                        continue;
+                    }
+                    const texto = await response.text();
+                    const candidato = JSON.parse(texto);
+                    if (!candidato || !candidato.turnpoints) {
+                        errores.push(`${intentos[i].nombre}: resposta sense turnpoints`);
+                        continue;
+                    }
+                    task = candidato;
+                    break; 
+                } catch (err) {
+                    let motivo = (err.name === 'AbortError') ? 'massa lent (timeout 6s)' : (err.message || err);
+                    errores.push(`${intentos[i].nombre}: ${motivo}`);
+                }
+            }
+
+            btn.disabled = false;
+            btn.innerText = "🔍 Buscar Dades";
+
+            if (!task) {
+                console.error('Errors de descàrrega:', errores);
+                alert(`No s'ha pogut obtenir la task "${code.toUpperCase()}".`);
+                return;
+            }
+
+            taskDataGlobal = task;
+            document.body.classList.add('task-loaded');
+
+            const despegueName = task.turnpoints[0].waypoint.name;
+            const despegueDesc = task.turnpoints[0].waypoint.description || '';
+            document.getElementById('launchSiteInput').value = `${despegueName} - ${despegueDesc}`;
+            
+            if (task.sss && task.sss.timeGates && task.sss.timeGates.length > 0) {
+                document.getElementById('startInput').value = utcAlocal(task.sss.timeGates[0].substring(0, 5));
+            }
+            if (task.goal && task.goal.deadline) {
+                document.getElementById('deadlineInput').value = utcAlocal(task.goal.deadline.substring(0, 5));
+            }
+            horaOriginalStart = document.getElementById('startInput').value;
+            horaOriginalDeadline = document.getElementById('deadlineInput').value;
+
+            alert(`✅ Dades precarregades de '${code.toUpperCase()}' amb èxit.`);
+        }
+
+        async function generarTaulerGrafic() {
+            const code = document.getElementById('taskCodeInput').value.trim().toLowerCase();
+            const btnGenerar = document.querySelector('.btn-cargar');
+            const textoOriginalBtn = btnGenerar.innerText;
+
+            const ligaSel = document.getElementById('ligaInput');
+            if (!ligaSel.value) {
+                alert("Si us plau, selecciona primer una Lliga.");
+                ligaSel.focus();
+                return;
+            }
+
+            if (!taskDataGlobal) {
+                alert("Primer hem de descarregar la informació de la web.");
+                await buscarDatosTask();
+                if (!taskDataGlobal) return;
+            }
+
+            btnGenerar.disabled = true;
+            btnGenerar.innerText = "⏳ Generant QR amb les hores noves...";
+
+            let hoy = new Date();
+            let fechaStr = `${String(hoy.getDate()).padStart(2,'0')}-${String(hoy.getMonth()+1).padStart(2,'0')}-${hoy.getFullYear()}`;
+            nombreArchivoGlobal = `PANEL_${document.getElementById('ligaInput').value.replace(/ /g,'_')}_${fechaStr}.png`;
+
+            // Título y Código
+            document.getElementById('lblTaskTitle').innerText = `${document.getElementById('ligaInput').value} — TASK ${fechaStr.replace(/-/g, '/')}`;
+            const horaStartActual = document.getElementById('startInput').value.trim();
+            const horaDeadlineActual = document.getElementById('deadlineInput').value.trim();
+            const horesModificades = (horaOriginalStart !== null && horaStartActual !== horaOriginalStart)
+                || (horaOriginalDeadline !== null && horaDeadlineActual !== horaOriginalDeadline);
+            document.getElementById('lblCodiTask').innerText = code + (horesModificades ? ' (Hores modificades)' : '');
+
+            let sentidoGiro = taskDataGlobal.turnDirection ? taskDataGlobal.turnDirection.toUpperCase() : ((hoy.getDate() % 2 === 0) ? "DRETA" : "ESQUERRA");
+            document.getElementById('lblTurnText').innerText = sentidoGiro;
+            document.getElementById('imgTurnGraphic').src = sentidoGiro === "ESQUERRA" 
+                ? "https://raw.githubusercontent.com/MiquelVillarta/pictures/refs/heads/main/LEFT.webp"
+                : "https://raw.githubusercontent.com/MiquelVillarta/pictures/refs/heads/main/right.webp";
+
+            document.getElementById('lblLaunch').innerText = document.getElementById('launchSiteInput').value;
+            document.getElementById('lblWinOpen').innerText = document.getElementById('windowOpenInput').value;
+            document.getElementById('lblWinClose').innerText = document.getElementById('windowCloseInput').value;
+            document.getElementById('lblStart').innerText = document.getElementById('startInput').value;
+            document.getElementById('lblDeadline').innerText = document.getElementById('deadlineInput').value;
+            
+            document.getElementById('outFreq').innerText = `📡 FREQ. SEGURETAT: ${document.getElementById('freqInput').value} MHz`;
+            document.getElementById('outRec').innerText = `🛻 TEL. RECOLLIDES: ${document.getElementById('recInput').value}`;
+            document.getElementById('outEme').innerText = `🚨 EMERGÈNCIES: ${document.getElementById('emeInput').value}`;
+
+            document.getElementById('staticMapImg').src = `https://tools.xcontest.org/api/xctsk/image/${code}`;
+
+            // --- EJECUCIÓN MATEMÁTICA EN SEGUNDO PLANO ---
+            let tps = taskDataGlobal.turnpoints;
+            let numTps = tps.length;
+            let tipoGolManga = taskDataGlobal.goal && taskDataGlobal.goal.type ? taskDataGlobal.goal.type.toUpperCase() : "CYLINDER";
+
+            let optPoints = tps.map(tp => [tp.waypoint.lat, tp.waypoint.lon]);
+            for (let iter = 0; iter < 15; iter++) {
+                for (let i = 0; i < numTps; i++) {
+                    let latC = tps[i].waypoint.lat;
+                    let lonC = tps[i].waypoint.lon;
+                    let rad = tps[i].radius;
+                    if (i === 0) {
+                        optPoints[0] = [latC, lonC];
+                    } else if (i === numTps - 1) {
+                        if (tipoGolManga === "LINE") {
+                            optPoints[i] = [latC, lonC];
+                        } else {
+                            let rmb = calculoRumbo(latC, lonC, optPoints[i-1][0], optPoints[i-1][1]);
+                            optPoints[i] = puntoInterseccion(latC, lonC, rad, rmb);
+                        }
+                    } else {
+                        let r1 = calculoRumbo(latC, lonC, optPoints[i-1][0], optPoints[i-1][1]);
+                        let r2 = calculoRumbo(latC, lonC, optPoints[i+1][0], optPoints[i+1][1]);
+                        let bisectriz = r1 + (r2 - r1) / 2;
+                        optPoints[i] = puntoInterseccion(latC, lonC, rad, bisectriz);
+                    }
+                }
+            }
+
+            let totalCentros = 0;
+            let totalOptim = 0;
+            for (let i = 1; i < numTps; i++) {
+                totalCentros += distanciaHaver(tps[i-1].waypoint.lat, tps[i-1].waypoint.lon, tps[i].waypoint.lat, tps[i].waypoint.lon);
+                totalOptim += distanciaHaver(optPoints[i-1][0], optPoints[i-1][1], optPoints[i][0], optPoints[i][1]);
+            }
+
+            // Inyectamos el cálculo en los cuadros sin fallos
+            document.getElementById('lblTotalDist').innerText = totalOptim.toFixed(1);
+            document.getElementById('lblCenterDist').innerText = totalCentros.toFixed(1);
+
+            let tbody = document.querySelector('#taskTable tbody');
+            tbody.innerHTML = "";
+
+            tps.forEach((tp, i) => {
+                let badgeHTML = "";
+                let claseFila = "";
+                let subLabelHTML = "";
+
+                if (i === 0) {
+                    badgeHTML = `<span class="badge-tp bg-takeoff">TAKEOFF</span>`;
+                } else if (i === numTps - 1) {
+                    badgeHTML = `<span class="badge-tp bg-goal">GOAL</span>`;
+                    claseFila = "fila-goal";
+                    subLabelHTML = `<br><span class="text-blue">${tipoGolManga}</span>`;
+                } else if (tp.type === "SSS") {
+                    badgeHTML = `<span class="badge-tp bg-sss">SSS</span><span class="badge-hora">${document.getElementById('startInput').value}</span>`;
+                    claseFila = "fila-sss";
+                } else if (tp.type === "ESS" || i === numTps - 2) {
+                    badgeHTML = `<span class="badge-tp bg-ess">ESS</span><span class="badge-hora">${document.getElementById('deadlineInput').value}</span>`;
+                    claseFila = "fila-ess";
+                }
+
+                let radioStr = tp.radius >= 1000 ? `${tp.radius/1000} Km` : `${tp.radius}m`;
+
+                tbody.innerHTML += `
+                    <tr class="${claseFila}">
+                        <td class="bold-cell text-blue2">${tp.waypoint.name}${badgeHTML}${subLabelHTML}</td>
+                        <td class="bold-cell desc-cell" style="color:#0d1b4c;">${tp.waypoint.description || '---'}</td>
+                        <td class="bold-cell" style="font-size:15px;">${radioStr}</td>
+                    </tr>
+                `;
+            });
+
+            // --- GENERAR QR CON LAS HORAS ACTUALIZADAS ---
+            const taskActualizado = construirTaskActualizado();
+            if (taskActualizado) {
+                await generarQRCode(taskActualizado);
+            }
+
+            document.getElementById('setupSection').style.display = 'none';
+            document.getElementById('boardSection').style.display = 'block';
+
+            btnGenerar.disabled = false;
+            btnGenerar.innerText = textoOriginalBtn;
+        }
+
+        function generarCanvasTablero() {
+            return html2canvas(document.getElementById('captureArea'), {
+                useCORS: true,
+                allowTaint: true,
+                scale: 2
+            });
+        }
+
+        function descargarImagen() {
+            let btn = document.getElementById('btnCap');
+            btn.innerText = "⏳...";
+            generarCanvasTablero().then(canvas => {
+                let link = document.createElement('a');
+                link.download = nombreArchivoGlobal;
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+                btn.innerText = "📸 Guardar Foto";
+            });
+        }
+
+        function compartirImagenWhatsApp() {
+            let btn = document.getElementById('btnWA');
+            btn.innerText = "⏳...";
+            
+            generarCanvasTablero().then(canvas => {
+                canvas.toBlob(async (blob) => {
+                    const file = new File([blob], nombreArchivoGlobal, { type: 'image/png' });
+                    
+                    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                        try {
+                            await navigator.share({
+                                files: [file],
+                                title: 'Tauler de Màniga',
+                                text: 'Aquí teniu el tauler de la ' + document.getElementById('ligaInput').value + '.'
+                            });
+                        } catch (err) {
+                            descargarComoAlternativa();
+                        }
+                    } else {
+                        descargarComoAlternativa();
+                    }
+                    btn.innerText = "📲 Compartir Tauler";
+                }, 'image/png');
+            });
+        }
+
+        function descargarComoAlternativa() {
+            alert("El navegador no admet compartir fitxers directament. S'ha descarregat la imatge perquè la puguis adjuntar tu mateix a WhatsApp.");
+            descargarImagen();
+        }
+    </script>
+</body>
+</html>
