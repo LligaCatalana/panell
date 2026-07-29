@@ -5,6 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Generador de Task Board</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 5px; background: #48101E; font-size: 16px; color: #333; transition: background 0.4s ease; }
         body.task-loaded { background: #0F3D24; }
@@ -65,8 +69,11 @@
         .bg-ess { background-color: #f57c00; }
         .bg-goal { background-color: #c62828; }
 
-        .map-static-container { width: 100%; margin-top: 5px; border: 2px solid #b0bec5; border-radius: 6px; overflow: hidden; background: #333; }
-        .map-static-container img { width: 100%; height: auto; display: block; }
+        .map-static-container { width: 100%; height: 380px; margin-top: 5px; border: 2px solid #b0bec5; border-radius: 6px; overflow: hidden; background: #1e293b; z-index: 10; position: relative; }
+        #taskMap { width: 100%; height: 100%; }
+
+        .wpt-task-label { text-align: center; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; font-weight: 700; color: #0f172a; line-height: 1.1; text-shadow: 1px 1px 2px #ffffff, -1px -1px 2px #ffffff, 1px -1px 2px #ffffff, -1px 1px 2px #ffffff; pointer-events: none; white-space: nowrap; }
+        .wpt-task-label b { font-size: 13px; color: #000000; }
 
         .qr-container { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; background: #fff; border: 2px solid #b0bec5; border-radius: 6px; padding: 14px; }
         .qr-container img { width: 42%; max-width: 220px; min-width: 140px; height: auto; aspect-ratio: 1 / 1; flex-shrink: 0; }
@@ -234,8 +241,9 @@
                 </div>
             </div>
 
+            <!-- CONTENIDOR DEL MAPA LEAFLET INTERACTIU -->
             <div class="map-static-container">
-                <img id="staticMapImg" src="" alt="Mapa de la Task" crossorigin="anonymous">
+                <div id="taskMap"></div>
             </div>
 
             <div class="qr-container qr-hidden" id="qrContainer">
@@ -250,45 +258,140 @@
         </div>
     </div>
 
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
     <script>
         let nombreArchivoGlobal = "";
         let taskDataGlobal = null;
         let horaOriginalStart = null;
         let horaOriginalDeadline = null;
+        let leafletMapInstance = null;
+        let taskLayerGroup = null;
+        let globalOptPoints = [];
 
-        // ⚠️ Sustituye esta URL por la de tu propio Cloudflare Worker una vez desplegado
-        // (ver instrucciones en xctsk-proxy-worker.js). Déjalo vacío ("") si aún no lo tienes.
         const PROXY_PROPIO = "https://xctsk-proxy.trackslligacatalana.workers.dev";
 
-        // --- CÁLCULO MATEMÁTICO INVISIBLE ---
-        // Estas funciones no imprimen columnas nuevas, simplemente calculan el total final
-        function distanciaHaver(lat1, lon1, lat2, lon2) {
-            const R = 6371;
-            const dLat = (lat2 - lat1) * Math.PI / 180;
-            const dLon = (lon2 - lon1) * Math.PI / 180;
-            const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-                      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-                      Math.sin(dLon/2) * Math.sin(dLon/2);
-            return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
-        }
-
-        function calculoRumbo(lat1, lon1, lat2, lon2) {
+        // --- CÀLCUL MATEMÀTIC FAI CIVL 6.4.1 (v5.7) ---
+        function calcularRumbo(lat1, lon1, lat2, lon2) {
             let dLon = (lon2 - lon1) * Math.PI / 180;
             let rLat1 = lat1 * Math.PI / 180;
             let rLat2 = lat2 * Math.PI / 180;
-            return Math.atan2(Math.sin(dLon) * Math.cos(rLat2), Math.cos(rLat1) * Math.sin(rLat2) - Math.sin(rLat1) * Math.cos(rLat2) * Math.cos(dLon));
+            let y = Math.sin(dLon) * Math.cos(rLat2);
+            let x = Math.cos(rLat1) * Math.sin(rLat2) - Math.sin(rLat1) * Math.cos(rLat2) * Math.cos(dLon);
+            return Math.atan2(y, x);
         }
 
-        function puntoInterseccion(lat, lon, radioM, rumbo) {
-            let deltaLat = (radioM * Math.cos(rumbo)) / 111111.0;
-            let deltaLon = (radioM * Math.sin(rumbo)) / (111111.0 * Math.cos(lat * Math.PI / 180));
+        function calcularPuntoInterseccion(lat, lon, radio, rumbo) {
+            let deltaLat = (radio * Math.cos(rumbo)) / 111111.0;
+            let deltaLon = (radio * Math.sin(rumbo)) / (111111.0 * Math.cos(lat * Math.PI / 180));
             return [lat + deltaLat, lon + deltaLon];
         }
 
-        // --- CONVERSIÓN UTC <-> HORA LOCAL ---
-        // Los tiempos del .xctsk (timeGates / deadline) vienen en UTC ("13:30:00Z").
-        // Los mostramos en hora local del piloto para que no haya confusiones.
-        // Cambia este valor si algún día cambia el huso horario (p.ej. horario de invierno = 1).
+        function calcularDistanciaHaver(p1, p2) {
+            let R = 6371;
+            let dLat = (p2[0] - p1[0]) * Math.PI / 180;
+            let dLon = (p2[1] - p1[1]) * Math.PI / 180;
+            let a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                    Math.cos(p1[0] * Math.PI / 180) * Math.cos(p2[0] * Math.PI / 180) *
+                    Math.sin(dLon/2) * Math.sin(dLon/2);
+            let c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+            return R * c;
+        }
+
+        function calculateOptimizedRoute(turnpoints) {
+            let numTps = turnpoints.length;
+            if (numTps === 0) return { optPoints: [], centerDist: "0.0", optDist: "0.0" };
+
+            let centros = turnpoints.map(tp => ({
+                lat: tp.waypoint.lat,
+                lon: tp.waypoint.lon,
+                radius: tp.radius
+            }));
+
+            let puntosOptimos = centros.map(c => [c.lat, c.lon]);
+
+            for (let iter = 0; iter < 40; iter++) {
+                for (let i = 0; i < numTps; i++) {
+                    let latC = centros[i].lat;
+                    let lonC = centros[i].lon;
+                    let rad = centros[i].radius;
+
+                    if (i === 0) {
+                        if (numTps > 1) {
+                            let sigPoint = puntosOptimos[1];
+                            let rumbo = calcularRumbo(latC, lonC, sigPoint[0], sigPoint[1]);
+                            puntosOptimos[0] = calcularPuntoInterseccion(latC, lonC, rad, rumbo);
+                        } else {
+                            puntosOptimos[0] = [latC, lonC];
+                        }
+                    } 
+                    else if (i === numTps - 1) {
+                        let antPoint = puntosOptimos[i - 1];
+                        let rumboHaciaAtras = calcularRumbo(latC, lonC, antPoint[0], antPoint[1]);
+                        puntosOptimos[i] = calcularPuntoInterseccion(latC, lonC, rad, rumboHaciaAtras);
+                    } 
+                    else {
+                        let antPoint = puntosOptimos[i - 1];
+                        let sigPoint = puntosOptimos[i + 1];
+
+                        let mejorPunto = puntosOptimos[i];
+                        let menorDistancia = Infinity;
+
+                        let candidatosAngulos = [];
+                        const pasos = 36;
+                        for (let a = 0; a < pasos; a++) {
+                            candidatosAngulos.push((2 * Math.PI * a) / pasos);
+                        }
+
+                        candidatosAngulos.push(calcularRumbo(latC, lonC, antPoint[0], antPoint[1]));
+                        candidatosAngulos.push(calcularRumbo(latC, lonC, sigPoint[0], sigPoint[1]));
+
+                        let mejorAngulo = 0;
+                        for (let angulo of candidatosAngulos) {
+                            let candidato = calcularPuntoInterseccion(latC, lonC, rad, angulo);
+                            let dist = calcularDistanciaHaver(antPoint, candidato) + calcularDistanciaHaver(candidato, sigPoint);
+
+                            if (dist < menorDistancia) {
+                                menorDistancia = dist;
+                                mejorPunto = candidato;
+                                mejorAngulo = angulo;
+                            }
+                        }
+
+                        const rangoRefinamiento = (20 * Math.PI) / 180;
+                        const pasosFinos = 20;
+                        for (let f = -pasosFinos; f <= pasosFinos; f++) {
+                            let anguloFino = mejorAngulo + (f / pasosFinos) * rangoRefinamiento;
+                            let candidato = calcularPuntoInterseccion(latC, lonC, rad, anguloFino);
+                            let dist = calcularDistanciaHaver(antPoint, candidato) + calcularDistanciaHaver(candidato, sigPoint);
+
+                            if (dist < menorDistancia) {
+                                menorDistancia = dist;
+                                mejorPunto = candidato;
+                            }
+                        }
+
+                        puntosOptimos[i] = mejorPunto;
+                    }
+                }
+            }
+
+            let optDist = 0;
+            let centerDist = 0;
+            for (let i = 1; i < numTps; i++) {
+                optDist += calcularDistanciaHaver(puntosOptimos[i-1], puntosOptimos[i]);
+                centerDist += calcularDistanciaHaver([centros[i-1].lat, centros[i-1].lon], [centros[i].lat, centros[i].lon]);
+            }
+
+            return {
+                optPoints: puntosOptimos,
+                centerDist: centerDist.toFixed(1),
+                optDist: optDist.toFixed(1)
+            };
+        }
+
+        // --- CONVERSIÓ UTC <-> HORA LOCAL ---
         const TZ_OFFSET_HOURS = 2;
 
         function hhmmSumarHoras(hhmm, horas) {
@@ -300,18 +403,9 @@
             return `${hh}:${mm}`;
         }
 
-        function utcAlocal(hhmm) {
-            return hhmmSumarHoras(hhmm, TZ_OFFSET_HOURS);
-        }
+        function utcAlocal(hhmm) { return hhmmSumarHoras(hhmm, TZ_OFFSET_HOURS); }
+        function localAutc(hhmm) { return hhmmSumarHoras(hhmm, -TZ_OFFSET_HOURS); }
 
-        function localAutc(hhmm) {
-            return hhmmSumarHoras(hhmm, -TZ_OFFSET_HOURS);
-        }
-
-        // --- ACTUALIZACIÓN DE HORAS PARA EL QR ---
-        // Sustituye solo los 5 primeros caracteres (HH:MM) del string ISO original,
-        // conservando segundos/zona horaria tal cual venían del servidor (ej: "13:30:00Z").
-        // nuevaHHMM debe venir ya en UTC (usar localAutc() antes de llamar si el valor es local).
         function actualizarHora(original, nuevaHHMM) {
             if (!nuevaHHMM || nuevaHHMM.length < 4) return original;
             if (!original) return `${nuevaHHMM}:00Z`;
@@ -320,10 +414,8 @@
 
         function construirTaskActualizado() {
             if (!taskDataGlobal) return null;
-            // Clonamos para no tocar el original (por si se vuelve a pulsar "Generar")
             let taskClone = JSON.parse(JSON.stringify(taskDataGlobal));
 
-            // Los inputs están en hora LOCAL; los convertimos a UTC antes de escribirlos en el JSON del task.
             const nuevaStart = localAutc(document.getElementById('startInput').value.trim());
             const nuevaDeadline = localAutc(document.getElementById('deadlineInput').value.trim());
 
@@ -337,9 +429,6 @@
             return taskClone;
         }
 
-        // POST /api/xctsk/qr con el JSON de la tarea (con horas ya modificadas).
-        // Devuelve un SVG; lo convertimos en blob URL para pintarlo en <img> y
-        // que quede también capturado por html2canvas (al ser mismo origen, sin problema CORS).
         async function generarQRCode(taskJson) {
             const qrContainer = document.getElementById('qrContainer');
             const qrImg = document.getElementById('qrCodeImg');
@@ -381,7 +470,6 @@
                 }
             }
 
-            console.error('No s\'ha pogut generar el QR amb cap dels mètodes provats.');
             qrContainer.classList.add('qr-hidden');
             return false;
         }
@@ -472,6 +560,194 @@
             alert(`✅ Dades precarregades de '${code.toUpperCase()}' amb èxit.`);
         }
 
+        // --- RENDERITZADOR DE MAPA INTERACTIU LEAFLET ---
+        function renderInteractiveMap(turnpoints, optPoints) {
+            globalOptPoints = optPoints || [];
+            if (!leafletMapInstance) {
+                leafletMapInstance = L.map('taskMap', { zoomControl: true, preferCanvas: true }).setView([42.10, 1.80], 11);
+                
+                L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+                    maxZoom: 17,
+                    attribution: 'Map data: &copy; OpenStreetMap | OpenTopoMap'
+                }).addTo(leafletMapInstance);
+
+                taskLayerGroup = L.layerGroup().addTo(leafletMapInstance);
+            }
+
+            taskLayerGroup.clearLayers();
+            const bounds = [];
+            const centerPoints = [];
+
+            turnpoints.forEach((tp, idx) => {
+                let lat = tp.waypoint.lat;
+                let lon = tp.waypoint.lon;
+                let rad = tp.radius;
+                centerPoints.push([lat, lon]);
+
+                let circleColor = '#2563eb';
+                let circleFill = '#3b82f6';
+
+                if (idx === 0) { circleColor = '#dc2626'; circleFill = '#ef4444'; }
+                else if (tp.type === "SSS") { circleColor = '#16a34a'; circleFill = '#22c55e'; }
+                else if (tp.type === "ESS") { circleColor = '#ea580c'; circleFill = '#f97316'; }
+                else if (idx === turnpoints.length - 1) { circleColor = '#dc2626'; circleFill = '#ef4444'; }
+
+                // TRICK TRANSPARÈNCIA: Opacitat del 0.06 (6%) per evitar saturació en cilindres concèntrics
+                const circle = L.circle([lat, lon], {
+                    radius: rad,
+                    color: circleColor,
+                    fillColor: circleFill,
+                    fillOpacity: 0.15,
+                    weight: 2,
+                    interactive: false
+                });
+                taskLayerGroup.addLayer(circle);
+
+                const labelIcon = L.divIcon({
+                    className: 'wpt-task-label',
+                    html: `<b>${idx + 1}</b><br>${tp.waypoint.name}`,
+                    iconSize: [40, 24],
+                    iconAnchor: [20, 12]
+                });
+                const labelMarker = L.marker([lat, lon], { icon: labelIcon, interactive: false });
+                taskLayerGroup.addLayer(labelMarker);
+            });
+
+            if (centerPoints.length > 1) {
+                const centerLine = L.polyline(centerPoints, { color: '#94a3b8', weight: 2, dashArray: '4, 4', interactive: false });
+                taskLayerGroup.addLayer(centerLine);
+            }
+
+            if (optPoints && optPoints.length > 0) {
+                const optLine = L.polyline(optPoints, { color: '#a855f7', weight: 3, interactive: false });
+                taskLayerGroup.addLayer(optLine);
+                optPoints.forEach(pt => bounds.push([pt[0], pt[1]]));
+            } else {
+                centerPoints.forEach(pt => bounds.push(pt));
+            }
+
+            if (bounds.length > 0) {
+                leafletMapInstance.fitBounds(bounds, { padding: [40, 40] });
+            }
+
+            setTimeout(() => { leafletMapInstance.invalidateSize(); }, 300);
+        }
+
+        // Dibuixa un canvas overlay d'alta resolució directament sobre el mapa abans de html2canvas
+        function overlayCanvasVectorialBeforeCapture() {
+            if (!leafletMapInstance || !taskDataGlobal) return null;
+
+            const mapContainer = document.getElementById('taskMap');
+            let captureCanvas = document.getElementById('mapCaptureCanvasOverlay');
+            if (!captureCanvas) {
+                captureCanvas = document.createElement('canvas');
+                captureCanvas.id = 'mapCaptureCanvasOverlay';
+                captureCanvas.style.position = 'absolute';
+                captureCanvas.style.top = '0';
+                captureCanvas.style.left = '0';
+                captureCanvas.style.zIndex = '1000';
+                captureCanvas.style.pointerEvents = 'none';
+                mapContainer.appendChild(captureCanvas);
+            }
+
+            const w = mapContainer.clientWidth;
+            const h = mapContainer.clientHeight;
+            captureCanvas.width = w;
+            captureCanvas.height = h;
+
+            const ctx = captureCanvas.getContext('2d');
+            ctx.clearRect(0, 0, w, h);
+
+            const turnpoints = taskDataGlobal.turnpoints;
+            const centerPoints = [];
+
+            // 1. Dibuixar Cilindres
+            turnpoints.forEach((tp, idx) => {
+                const lat = tp.waypoint.lat;
+                const lon = tp.waypoint.lon;
+                const p = leafletMapInstance.latLngToContainerPoint([lat, lon]);
+                centerPoints.push(p);
+
+                const edgePt = leafletMapInstance.latLngToContainerPoint(calcularPuntoInterseccion(lat, lon, tp.radius, 0));
+                const rPx = Math.abs(p.y - edgePt.y);
+
+                let strokeColor = '#2563eb';
+                // TRANSPARÈNCIA CANVAS CAPTURA: Opacitat de 0.06 per a cercles concèntrics nets
+                let fillColor = 'rgba(59, 130, 246, 0.06)';
+
+                if (idx === 0) { strokeColor = '#dc2626'; fillColor = 'rgba(239, 68, 68, 0.06)'; }
+                else if (tp.type === "SSS") { strokeColor = '#16a34a'; fillColor = 'rgba(34, 197, 94, 0.06)'; }
+                else if (tp.type === "ESS") { strokeColor = '#ea580c'; fillColor = 'rgba(249, 115, 22, 0.06)'; }
+                else if (idx === turnpoints.length - 1) { strokeColor = '#dc2626'; fillColor = 'rgba(239, 68, 68, 0.06)'; }
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, rPx, 0, 2 * Math.PI);
+                ctx.fillStyle = fillColor;
+                ctx.fill();
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = strokeColor;
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
+                ctx.fillStyle = strokeColor;
+                ctx.fill();
+            });
+
+            // 2. Dibuixar línia de centres
+            if (centerPoints.length > 1) {
+                ctx.beginPath();
+                ctx.setLineDash([4, 4]);
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 2;
+                centerPoints.forEach((p, idx) => {
+                    if (idx === 0) ctx.moveTo(p.x, p.y);
+                    else ctx.lineTo(p.x, p.y);
+                });
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // 3. Dibuixar ruta optimitzada
+            if (globalOptPoints && globalOptPoints.length > 1) {
+                ctx.beginPath();
+                ctx.strokeStyle = '#a855f7';
+                ctx.lineWidth = 3;
+                globalOptPoints.forEach((pt, idx) => {
+                    const p = leafletMapInstance.latLngToContainerPoint([pt[0], pt[1]]);
+                    if (idx === 0) ctx.moveTo(p.x, p.y);
+                    else ctx.lineTo(p.x, p.y);
+                });
+                ctx.stroke();
+            }
+
+            // 4. Dibuixar Etiquetes
+            turnpoints.forEach((tp, idx) => {
+                const p = leafletMapInstance.latLngToContainerPoint([tp.waypoint.lat, tp.waypoint.lon]);
+                ctx.font = 'bold 12px "Helvetica Neue", Arial';
+                ctx.fillStyle = '#000000';
+                ctx.textAlign = 'center';
+                
+                ctx.fillStyle = '#ffffff';
+                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x - 1, p.y - 9);
+                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x + 1, p.y - 9);
+                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x, p.y - 10);
+                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x, p.y - 8);
+
+                ctx.fillStyle = '#000000';
+                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x, p.y - 9);
+            });
+
+            return captureCanvas;
+        }
+
+        function removeCanvasVectorialAfterCapture() {
+            const captureCanvas = document.getElementById('mapCaptureCanvasOverlay');
+            if (captureCanvas) {
+                captureCanvas.remove();
+            }
+        }
+
         async function generarTaulerGrafic() {
             const code = document.getElementById('taskCodeInput').value.trim().toLowerCase();
             const btnGenerar = document.querySelector('.btn-cargar');
@@ -497,7 +773,6 @@
             let fechaStr = `${String(hoy.getDate()).padStart(2,'0')}-${String(hoy.getMonth()+1).padStart(2,'0')}-${hoy.getFullYear()}`;
             nombreArchivoGlobal = `PANEL_${document.getElementById('ligaInput').value.replace(/ /g,'_')}_${fechaStr}.png`;
 
-            // Título y Código
             document.getElementById('lblTaskTitle').innerText = `${document.getElementById('ligaInput').value} — TASK ${fechaStr.replace(/-/g, '/')}`;
             const horaStartActual = document.getElementById('startInput').value.trim();
             const horaDeadlineActual = document.getElementById('deadlineInput').value.trim();
@@ -521,48 +796,17 @@
             document.getElementById('outRec').innerText = `🛻 TEL. RECOLLIDES: ${document.getElementById('recInput').value}`;
             document.getElementById('outEme').innerText = `🚨 EMERGÈNCIES: ${document.getElementById('emeInput').value}`;
 
-            document.getElementById('staticMapImg').src = `https://tools.xcontest.org/api/xctsk/image/${code}`;
-
-            // --- EJECUCIÓN MATEMÁTICA EN SEGUNDO PLANO ---
+            // --- EXECUCIÓ CÀLCUL FAI CIVL 6.4.1 ---
             let tps = taskDataGlobal.turnpoints;
             let numTps = tps.length;
             let tipoGolManga = taskDataGlobal.goal && taskDataGlobal.goal.type ? taskDataGlobal.goal.type.toUpperCase() : "CYLINDER";
 
-            let optPoints = tps.map(tp => [tp.waypoint.lat, tp.waypoint.lon]);
-            for (let iter = 0; iter < 15; iter++) {
-                for (let i = 0; i < numTps; i++) {
-                    let latC = tps[i].waypoint.lat;
-                    let lonC = tps[i].waypoint.lon;
-                    let rad = tps[i].radius;
-                    if (i === 0) {
-                        optPoints[0] = [latC, lonC];
-                    } else if (i === numTps - 1) {
-                        if (tipoGolManga === "LINE") {
-                            optPoints[i] = [latC, lonC];
-                        } else {
-                            let rmb = calculoRumbo(latC, lonC, optPoints[i-1][0], optPoints[i-1][1]);
-                            optPoints[i] = puntoInterseccion(latC, lonC, rad, rmb);
-                        }
-                    } else {
-                        let r1 = calculoRumbo(latC, lonC, optPoints[i-1][0], optPoints[i-1][1]);
-                        let r2 = calculoRumbo(latC, lonC, optPoints[i+1][0], optPoints[i+1][1]);
-                        let bisectriz = r1 + (r2 - r1) / 2;
-                        optPoints[i] = puntoInterseccion(latC, lonC, rad, bisectriz);
-                    }
-                }
-            }
+            let routeData = calculateOptimizedRoute(tps);
 
-            let totalCentros = 0;
-            let totalOptim = 0;
-            for (let i = 1; i < numTps; i++) {
-                totalCentros += distanciaHaver(tps[i-1].waypoint.lat, tps[i-1].waypoint.lon, tps[i].waypoint.lat, tps[i].waypoint.lon);
-                totalOptim += distanciaHaver(optPoints[i-1][0], optPoints[i-1][1], optPoints[i][0], optPoints[i][1]);
-            }
+            document.getElementById('lblTotalDist').innerText = routeData.optDist;
+            document.getElementById('lblCenterDist').innerText = routeData.centerDist;
 
-            // Inyectamos el cálculo en los cuadros sin fallos
-            document.getElementById('lblTotalDist').innerText = totalOptim.toFixed(1);
-            document.getElementById('lblCenterDist').innerText = totalCentros.toFixed(1);
-
+            // --- CONSTRUCCIÓ TAULA BALISES ---
             let tbody = document.querySelector('#taskTable tbody');
             tbody.innerHTML = "";
 
@@ -596,25 +840,32 @@
                 `;
             });
 
-            // --- GENERAR QR CON LAS HORAS ACTUALIZADAS ---
+            document.getElementById('setupSection').style.display = 'none';
+            document.getElementById('boardSection').style.display = 'block';
+
+            // Dibuixar Mapa Leaflet interactiu
+            renderInteractiveMap(tps, routeData.optPoints);
+
             const taskActualizado = construirTaskActualizado();
             if (taskActualizado) {
                 await generarQRCode(taskActualizado);
             }
 
-            document.getElementById('setupSection').style.display = 'none';
-            document.getElementById('boardSection').style.display = 'block';
-
             btnGenerar.disabled = false;
             btnGenerar.innerText = textoOriginalBtn;
         }
 
-        function generarCanvasTablero() {
-            return html2canvas(document.getElementById('captureArea'), {
+        async function generarCanvasTablero() {
+            overlayCanvasVectorialBeforeCapture();
+            
+            const canvas = await html2canvas(document.getElementById('captureArea'), {
                 useCORS: true,
                 allowTaint: true,
                 scale: 2
             });
+
+            removeCanvasVectorialAfterCapture();
+            return canvas;
         }
 
         function descargarImagen() {
