@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador de Task Board</title>
+    <title>Generador de PANELL (v.2.0)</title>
 	<!-- ICON -->
   <link rel="icon" type="image/png" href="icon.png">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
@@ -77,8 +77,9 @@
         .wpt-task-label { text-align: center; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; font-weight: 700; color: #0f172a; line-height: 1.1; text-shadow: 1px 1px 2px #ffffff, -1px -1px 2px #ffffff, 1px -1px 2px #ffffff, -1px 1px 2px #ffffff; pointer-events: none; white-space: nowrap; }
         .wpt-task-label b { font-size: 13px; color: #000000; }
 
-        .qr-container { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; background: #fff; border: 2px solid #b0bec5; border-radius: 6px; padding: 14px; }
-        .qr-container img { width: 42%; max-width: 220px; min-width: 140px; height: auto; aspect-ratio: 1 / 1; flex-shrink: 0; }
+        .qr-container { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; background: #fff; border: 2px solid #b0bec5; border-radius: 6px; padding: 14px; box-sizing: border-box; }
+        /* Modificado para que ocupe todo el ancho */
+        .qr-container img { width: 100%; max-width: none; height: auto; aspect-ratio: 1 / 1; flex-shrink: 0; }
         .qr-container .qr-text { font-size: 15px; color: #455a64; font-weight: bold; text-transform: uppercase; line-height: 1.4; }
         .qr-container.qr-hidden { display: none; }
         
@@ -104,7 +105,7 @@
             <div class="form-group full-width">
                 <label>Codi Task XContest</label>
                 <div style="display:flex; gap:8px;">
-                    <input type="text" id="taskCodeInput" placeholder="Ex: puti, zixe..." value="zebi" style="flex:2;">
+                    <input type="text" id="taskCodeInput" placeholder="Ex: qano, zixe..." value="gira" style="flex:2;">
                     <button id="btnBuscar" class="btn-api" onclick="buscarDatosTask()">🔍 Buscar Dades</button>
                 </div>
             </div>
@@ -243,14 +244,14 @@
                 </div>
             </div>
 
-            <!-- CONTENIDOR DEL MAPA LEAFLET INTERACTIU -->
-            <div class="map-static-container">
-                <div id="taskMap"></div>
-            </div>
-
+            <!-- ORDEN INTERCAMBIADO: QR PRIMERO -->
             <div class="qr-container qr-hidden" id="qrContainer">
                 <img id="qrCodeImg" src="" alt="QR Task">
-                <span class="qr-text">Escaneja per<br>carregar a XCTrack</span>
+            </div>
+
+            <!-- CONTENIDOR DEL MAPA LEAFLET INTERACTIU DESPUÉS -->
+            <div class="map-static-container">
+                <div id="taskMap"></div>
             </div>
         </div>
         
@@ -550,6 +551,14 @@
             const despegueDesc = task.turnpoints[0].waypoint.description || '';
             document.getElementById('launchSiteInput').value = `${despegueName} - ${despegueDesc}`;
             
+            // --- HORAS DE VENTANA DINÁMICAS (TAKEOFF) ---
+            if (task.takeoff && task.takeoff.timeOpen) {
+                document.getElementById('windowOpenInput').value = utcAlocal(task.takeoff.timeOpen.substring(0, 5));
+            }
+            if (task.takeoff && task.takeoff.timeClose) {
+                document.getElementById('windowCloseInput').value = utcAlocal(task.takeoff.timeClose.substring(0, 5));
+            }
+
             if (task.sss && task.sss.timeGates && task.sss.timeGates.length > 0) {
                 document.getElementById('startInput').value = utcAlocal(task.sss.timeGates[0].substring(0, 5));
             }
@@ -594,7 +603,6 @@
                 else if (tp.type === "ESS") { circleColor = '#ea580c'; circleFill = '#f97316'; }
                 else if (idx === turnpoints.length - 1) { circleColor = '#dc2626'; circleFill = '#ef4444'; }
 
-                // TRICK TRANSPARÈNCIA: Opacitat del 0.06 (6%) per evitar saturació en cilindres concèntrics
                 const circle = L.circle([lat, lon], {
                     radius: rad,
                     color: circleColor,
@@ -635,7 +643,6 @@
             setTimeout(() => { leafletMapInstance.invalidateSize(); }, 300);
         }
 
-        // Dibuixa un canvas overlay d'alta resolució directament sobre el mapa abans de html2canvas
         function overlayCanvasVectorialBeforeCapture() {
             if (!leafletMapInstance || !taskDataGlobal) return null;
 
@@ -663,7 +670,6 @@
             const turnpoints = taskDataGlobal.turnpoints;
             const centerPoints = [];
 
-            // 1. Dibuixar Cilindres
             turnpoints.forEach((tp, idx) => {
                 const lat = tp.waypoint.lat;
                 const lon = tp.waypoint.lon;
@@ -674,7 +680,6 @@
                 const rPx = Math.abs(p.y - edgePt.y);
 
                 let strokeColor = '#2563eb';
-                // TRANSPARÈNCIA CANVAS CAPTURA: Opacitat de 0.06 per a cercles concèntrics nets
                 let fillColor = 'rgba(59, 130, 246, 0.06)';
 
                 if (idx === 0) { strokeColor = '#dc2626'; fillColor = 'rgba(239, 68, 68, 0.06)'; }
@@ -696,7 +701,6 @@
                 ctx.fill();
             });
 
-            // 2. Dibuixar línia de centres
             if (centerPoints.length > 1) {
                 ctx.beginPath();
                 ctx.setLineDash([4, 4]);
@@ -710,7 +714,6 @@
                 ctx.setLineDash([]);
             }
 
-            // 3. Dibuixar ruta optimitzada
             if (globalOptPoints && globalOptPoints.length > 1) {
                 ctx.beginPath();
                 ctx.strokeStyle = '#a855f7';
@@ -723,7 +726,6 @@
                 ctx.stroke();
             }
 
-            // 4. Dibuixar Etiquetes
             turnpoints.forEach((tp, idx) => {
                 const p = leafletMapInstance.latLngToContainerPoint([tp.waypoint.lat, tp.waypoint.lon]);
                 ctx.font = 'bold 12px "Helvetica Neue", Arial';
@@ -798,7 +800,6 @@
             document.getElementById('outRec').innerText = `🛻 TEL. RECOLLIDES: ${document.getElementById('recInput').value}`;
             document.getElementById('outEme').innerText = `🚨 EMERGÈNCIES: ${document.getElementById('emeInput').value}`;
 
-            // --- EXECUCIÓ CÀLCUL FAI CIVL 6.4.1 ---
             let tps = taskDataGlobal.turnpoints;
             let numTps = tps.length;
             let tipoGolManga = taskDataGlobal.goal && taskDataGlobal.goal.type ? taskDataGlobal.goal.type.toUpperCase() : "CYLINDER";
@@ -808,7 +809,6 @@
             document.getElementById('lblTotalDist').innerText = routeData.optDist;
             document.getElementById('lblCenterDist').innerText = routeData.centerDist;
 
-            // --- CONSTRUCCIÓ TAULA BALISES ---
             let tbody = document.querySelector('#taskTable tbody');
             tbody.innerHTML = "";
 
@@ -845,7 +845,6 @@
             document.getElementById('setupSection').style.display = 'none';
             document.getElementById('boardSection').style.display = 'block';
 
-            // Dibuixar Mapa Leaflet interactiu
             renderInteractiveMap(tps, routeData.optPoints);
 
             const taskActualizado = construirTaskActualizado();
