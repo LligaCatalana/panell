@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador de PANELL (v.2.0)</title>
+    <title>Generador de PANELL (v.2.1)</title>
 	<!-- ICON -->
   <link rel="icon" type="image/png" href="icon.png">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
@@ -13,10 +13,12 @@
 
     <style>
         body { font-family: 'Helvetica Neue', Arial, sans-serif; margin: 0; padding: 5px; background: #48101E; font-size: 16px; color: #333; transition: background 0.4s ease; }
-        body.task-loaded { background: #0F3D24; }
-        body.task-loaded .setup-box { background: #14532d; transition: background 0.4s ease; }
-        body.task-loaded .form-group input:not([readonly]), body.task-loaded .form-group select { background: #e3f7e8; color: #14532d; transition: background 0.4s ease; }
-        body.task-loaded .form-group input[readonly] { background: #cfeed9 !important; color: #14532d !important; }
+        .form-group.task-code-group { transition: background 0.4s ease, box-shadow 0.4s ease; border-radius: 8px; }
+        .form-group.task-code-group.loaded { background: #14532d; padding: 8px; margin: -8px; box-shadow: 0 0 0 2px #2abb12; }
+        .form-group.task-code-group.loaded input { background: #e3f7e8; color: #14532d; }
+
+        .loaded-badge { display: none; margin-left: 8px; background: #2abb12; color: #fff; padding: 3px 9px; border-radius: 4px; font-size: 12px; font-weight: 900; letter-spacing: 0.5px; vertical-align: middle; }
+        .loaded-badge.show { display: inline-block; }
         
         .setup-box { background: #263238; color: white; padding: 15px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         .setup-box h2 { margin: 0 0 15px 0; font-size: 24px; color: #ffb300; text-align: center; }
@@ -102,10 +104,10 @@
     <div class="setup-box" id="setupSection">
         <h2>CONFIGURACIÓ DE LA MÀNIGA</h2>
         <div class="form-grid">
-            <div class="form-group full-width">
-                <label>Codi Task XContest</label>
+            <div class="form-group full-width task-code-group" id="taskCodeGroup">
+                <label>Codi Task XContest <span class="loaded-badge" id="loadedBadge">✅ CARREGADA</span></label>
                 <div style="display:flex; gap:8px;">
-                    <input type="text" id="taskCodeInput" placeholder="Ex: qano, zixe..." value="gira" style="flex:2;">
+                    <input type="text" id="taskCodeInput" placeholder="Ex: qano, zixe..." value="gira" style="flex:2;" oninput="document.getElementById('taskCodeGroup').classList.remove('loaded'); document.getElementById('loadedBadge').classList.remove('show');">
                     <button id="btnBuscar" class="btn-api" onclick="buscarDatosTask()">🔍 Buscar Dades</button>
                 </div>
             </div>
@@ -545,7 +547,8 @@
             }
 
             taskDataGlobal = task;
-            document.body.classList.add('task-loaded');
+            document.getElementById('taskCodeGroup').classList.add('loaded');
+            document.getElementById('loadedBadge').classList.add('show');
 
             const despegueName = task.turnpoints[0].waypoint.name;
             const despegueDesc = task.turnpoints[0].waypoint.description || '';
@@ -577,10 +580,19 @@
             if (!leafletMapInstance) {
                 leafletMapInstance = L.map('taskMap', { zoomControl: true, preferCanvas: true }).setView([42.10, 1.80], 11);
                 
-                L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+
+                
+                
+                L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
                     maxZoom: 17,
-                    attribution: 'Map data: &copy; OpenStreetMap | OpenTopoMap'
+                    attribution: 'Tiles &copy; Esri'
                 }).addTo(leafletMapInstance);
+                
+                
+                
+                
+                
+                
 
                 taskLayerGroup = L.layerGroup().addTo(leafletMapInstance);
             }
