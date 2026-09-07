@@ -79,12 +79,13 @@
         .wpt-task-label { text-align: center; font-family: 'Helvetica Neue', Arial, sans-serif; font-size: 11px; font-weight: 700; color: #0f172a; line-height: 1.1; text-shadow: 1px 1px 2px #ffffff, -1px -1px 2px #ffffff, 1px -1px 2px #ffffff, -1px 1px 2px #ffffff; pointer-events: none; white-space: nowrap; }
         .wpt-task-label b { font-size: 13px; color: #000000; }
 
-        .qr-container { display: flex; align-items: center; justify-content: center; gap: 16px; margin-top: 8px; background: #fff; border: 2px solid #b0bec5; border-radius: 6px; padding: 14px; box-sizing: border-box; }
-        /* Modificado para que ocupe todo el ancho */
+        .qr-container { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; margin-top: 8px; background: #fff; border: 2px solid #b0bec5; border-radius: 6px; padding: 14px; box-sizing: border-box; }
         .qr-container img { width: 100%; max-width: none; height: auto; aspect-ratio: 1 / 1; flex-shrink: 0; }
         .qr-container .qr-text { font-size: 15px; color: #455a64; font-weight: bold; text-transform: uppercase; line-height: 1.4; }
         .qr-container.qr-hidden { display: none; }
         
+        .qr-liga-label { font-size: 24px; font-weight: 900; color: #b71c1c; text-align: center; text-transform: uppercase; letter-spacing: 1px; }
+
         .footer-info { border: 2px solid #b0bec5; padding: 12px; background: #fffde7; border-radius: 6px; }
         .footer-grid { display: flex; flex-direction: column; font-weight: bold; gap: 12px; }
         .footer-contacts { font-size: 16px; display: flex; flex-direction: column; gap: 5px; }
@@ -107,7 +108,7 @@
             <div class="form-group full-width task-code-group" id="taskCodeGroup">
                 <label>Codi Task XContest <span class="loaded-badge" id="loadedBadge">✅ CARREGADA</span></label>
                 <div style="display:flex; gap:8px;">
-                    <input type="text" id="taskCodeInput" placeholder="Ex: qano, zixe..." value="gira" style="flex:2;" oninput="document.getElementById('taskCodeGroup').classList.remove('loaded'); document.getElementById('loadedBadge').classList.remove('show');">
+                    <input type="text" id="taskCodeInput" placeholder="Ex: qano, zixe..." value="NOQO" style="flex:2;" oninput="document.getElementById('taskCodeGroup').classList.remove('loaded'); document.getElementById('loadedBadge').classList.remove('show');">
                     <button id="btnBuscar" class="btn-api" onclick="buscarDatosTask()">🔍 Buscar Dades</button>
                 </div>
             </div>
@@ -246,9 +247,11 @@
                 </div>
             </div>
 
-            <!-- ORDEN INTERCAMBIADO: QR PRIMERO -->
+            <!-- ORDEN INTERCAMBIADO: QR PRIMERO CON TEXTOS DE LLIGA -->
             <div class="qr-container qr-hidden" id="qrContainer">
+                <div class="qr-liga-label" id="lblLigaQRTop">LLIGA A</div>
                 <img id="qrCodeImg" src="" alt="QR Task">
+                <div class="qr-liga-label" id="lblLigaQRBottom">LLIGA A</div>
             </div>
 
             <!-- CONTENIDOR DEL MAPA LEAFLET INTERACTIU DESPUÉS -->
@@ -421,6 +424,12 @@
             if (!taskDataGlobal) return null;
             let taskClone = JSON.parse(JSON.stringify(taskDataGlobal));
 
+            // Asignar Autor (LLIGA A / LLIGA B) al JSON para XCONTEST
+            const ligaSel = document.getElementById('ligaInput').value;
+            if (ligaSel) {
+                taskClone.author = ligaSel;
+            }
+
             const nuevaStart = localAutc(document.getElementById('startInput').value.trim());
             const nuevaDeadline = localAutc(document.getElementById('deadlineInput').value.trim());
 
@@ -580,19 +589,10 @@
             if (!leafletMapInstance) {
                 leafletMapInstance = L.map('taskMap', { zoomControl: true, preferCanvas: true }).setView([42.10, 1.80], 11);
                 
-
-                
-                
                 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}', {
                     maxZoom: 17,
                     attribution: 'Tiles &copy; Esri'
                 }).addTo(leafletMapInstance);
-                
-                
-                
-                
-                
-                
 
                 taskLayerGroup = L.layerGroup().addTo(leafletMapInstance);
             }
@@ -787,9 +787,14 @@
 
             let hoy = new Date();
             let fechaStr = `${String(hoy.getDate()).padStart(2,'0')}-${String(hoy.getMonth()+1).padStart(2,'0')}-${hoy.getFullYear()}`;
-            nombreArchivoGlobal = `PANEL_${document.getElementById('ligaInput').value.replace(/ /g,'_')}_${fechaStr}.png`;
+            nombreArchivoGlobal = `PANEL_${ligaSel.value.replace(/ /g,'_')}_${fechaStr}.png`;
 
-            document.getElementById('lblTaskTitle').innerText = `${document.getElementById('ligaInput').value} — TASK ${fechaStr.replace(/-/g, '/')}`;
+            document.getElementById('lblTaskTitle').innerText = `${ligaSel.value} — TASK ${fechaStr.replace(/-/g, '/')}`;
+            
+            // Actualizar etiquetas de Lliga encima y debajo del QR
+            document.getElementById('lblLigaQRTop').innerText = ligaSel.value;
+            document.getElementById('lblLigaQRBottom').innerText = ligaSel.value;
+
             const horaStartActual = document.getElementById('startInput').value.trim();
             const horaDeadlineActual = document.getElementById('deadlineInput').value.trim();
             const horesModificades = (horaOriginalStart !== null && horaStartActual !== horaOriginalStart)
