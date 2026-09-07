@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generador de PANELL (v.2.1)</title>
+    <title>Generador de PANELL (v.3.0)</title>
 	<!-- ICON -->
   <link rel="icon" type="image/png" href="icon.png">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js" crossorigin="anonymous"></script>
@@ -103,7 +103,7 @@
 <body>
 
     <div class="setup-box" id="setupSection">
-        <h2>CONFIGURACIÓ DE LA MÀNIGA</h2>
+        <h2>Generador de PANELL (v.3.0)</h2>
         <div class="form-grid">
             <div class="form-group full-width task-code-group" id="taskCodeGroup">
                 <label>Codi Task XContest <span class="loaded-badge" id="loadedBadge">✅ CARREGADA</span></label>
@@ -253,16 +253,18 @@
                 <img id="qrCodeImg" src="" alt="QR Task">
                 <div class="qr-liga-label" id="lblLigaQRBottom">LLIGA A</div>
             </div>
-
-            <!-- CONTENIDOR DEL MAPA LEAFLET INTERACTIU DESPUÉS -->
-            <div class="map-static-container">
-                <div id="taskMap"></div>
-            </div>
         </div>
-        
+
         <div class="btn-group">
             <button class="btn-capture" id="btnCap" onclick="descargarImagen()">📸 Guardar Foto</button>
             <button class="btn-whatsapp" id="btnWA" onclick="compartirImagenWhatsApp()">📲 Compartir Tauler</button>
+        </div>
+
+        <!-- El mapa queda fora de #captureArea: es veu a la pantalla per repassar la
+             manga, però no forma part de la imatge que es desa o es comparteix,
+             ja que el mapa interactiu ja es pot consultar des del LINK que s'envia. -->
+        <div class="map-static-container">
+            <div id="taskMap"></div>
         </div>
     </div>
 
@@ -496,11 +498,6 @@
             }
 
             const ligaSel = document.getElementById('ligaInput');
-            if (!ligaSel.value) {
-                alert("Si us plau, selecciona primer una Lliga.");
-                ligaSel.focus();
-                return;
-            }
 
             let btn = document.getElementById('btnBuscar');
             btn.disabled = true;
@@ -518,6 +515,7 @@
             );
 
             let task = null;
+            let authorHeader = null;
             let errores = [];
 
             for (let i = 0; i < intentos.length; i++) {
@@ -539,6 +537,9 @@
                         continue;
                     }
                     task = candidato;
+                    // La API oficial retorna l'autor de la manga a la capçalera HTTP "Author"
+                    // (no dins del JSON). Alguns proxys no la reenvien; per això és opcional.
+                    authorHeader = response.headers.get('Author') || response.headers.get('author');
                     break; 
                 } catch (err) {
                     let motivo = (err.name === 'AbortError') ? 'massa lent (timeout 6s)' : (err.message || err);
@@ -558,6 +559,14 @@
             taskDataGlobal = task;
             document.getElementById('taskCodeGroup').classList.add('loaded');
             document.getElementById('loadedBadge').classList.add('show');
+
+            // Autoasignar la Lliga a partir de l'autor de la manga (capçalera HTTP "Author")
+            const autorTask = (authorHeader || '').trim().toUpperCase();
+            if (autorTask === 'LLIGA A' || autorTask === 'LLIGA B') {
+                ligaSel.value = autorTask;
+            } else {
+                ligaSel.value = '';
+            }
 
             const despegueName = task.turnpoints[0].waypoint.name;
             const despegueDesc = task.turnpoints[0].waypoint.description || '';
@@ -580,7 +589,11 @@
             horaOriginalStart = document.getElementById('startInput').value;
             horaOriginalDeadline = document.getElementById('deadlineInput').value;
 
-            alert(`✅ Dades precarregades de '${code.toUpperCase()}' amb èxit.`);
+            if (ligaSel.value) {
+                alert(`✅ Dades precarregades de '${code.toUpperCase()}' amb èxit.\n\nLliga detectada automàticament: ${ligaSel.value}.`);
+            } else {
+                alert(`✅ Dades precarregades de '${code.toUpperCase()}' amb èxit.\n\n⚠️ No s'ha pogut detectar la Lliga de l'autor de la manga. Selecciona-la manualment abans de generar el tauler.`);
+            }
         }
 
         // --- RENDERITZADOR DE MAPA INTERACTIU LEAFLET ---
@@ -653,115 +666,6 @@
             }
 
             setTimeout(() => { leafletMapInstance.invalidateSize(); }, 300);
-        }
-
-        function overlayCanvasVectorialBeforeCapture() {
-            if (!leafletMapInstance || !taskDataGlobal) return null;
-
-            const mapContainer = document.getElementById('taskMap');
-            let captureCanvas = document.getElementById('mapCaptureCanvasOverlay');
-            if (!captureCanvas) {
-                captureCanvas = document.createElement('canvas');
-                captureCanvas.id = 'mapCaptureCanvasOverlay';
-                captureCanvas.style.position = 'absolute';
-                captureCanvas.style.top = '0';
-                captureCanvas.style.left = '0';
-                captureCanvas.style.zIndex = '1000';
-                captureCanvas.style.pointerEvents = 'none';
-                mapContainer.appendChild(captureCanvas);
-            }
-
-            const w = mapContainer.clientWidth;
-            const h = mapContainer.clientHeight;
-            captureCanvas.width = w;
-            captureCanvas.height = h;
-
-            const ctx = captureCanvas.getContext('2d');
-            ctx.clearRect(0, 0, w, h);
-
-            const turnpoints = taskDataGlobal.turnpoints;
-            const centerPoints = [];
-
-            turnpoints.forEach((tp, idx) => {
-                const lat = tp.waypoint.lat;
-                const lon = tp.waypoint.lon;
-                const p = leafletMapInstance.latLngToContainerPoint([lat, lon]);
-                centerPoints.push(p);
-
-                const edgePt = leafletMapInstance.latLngToContainerPoint(calcularPuntoInterseccion(lat, lon, tp.radius, 0));
-                const rPx = Math.abs(p.y - edgePt.y);
-
-                let strokeColor = '#2563eb';
-                let fillColor = 'rgba(59, 130, 246, 0.06)';
-
-                if (idx === 0) { strokeColor = '#dc2626'; fillColor = 'rgba(239, 68, 68, 0.06)'; }
-                else if (tp.type === "SSS") { strokeColor = '#16a34a'; fillColor = 'rgba(34, 197, 94, 0.06)'; }
-                else if (tp.type === "ESS") { strokeColor = '#ea580c'; fillColor = 'rgba(249, 115, 22, 0.06)'; }
-                else if (idx === turnpoints.length - 1) { strokeColor = '#dc2626'; fillColor = 'rgba(239, 68, 68, 0.06)'; }
-
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, rPx, 0, 2 * Math.PI);
-                ctx.fillStyle = fillColor;
-                ctx.fill();
-                ctx.lineWidth = 2;
-                ctx.strokeStyle = strokeColor;
-                ctx.stroke();
-
-                ctx.beginPath();
-                ctx.arc(p.x, p.y, 3, 0, 2 * Math.PI);
-                ctx.fillStyle = strokeColor;
-                ctx.fill();
-            });
-
-            if (centerPoints.length > 1) {
-                ctx.beginPath();
-                ctx.setLineDash([4, 4]);
-                ctx.strokeStyle = '#94a3b8';
-                ctx.lineWidth = 2;
-                centerPoints.forEach((p, idx) => {
-                    if (idx === 0) ctx.moveTo(p.x, p.y);
-                    else ctx.lineTo(p.x, p.y);
-                });
-                ctx.stroke();
-                ctx.setLineDash([]);
-            }
-
-            if (globalOptPoints && globalOptPoints.length > 1) {
-                ctx.beginPath();
-                ctx.strokeStyle = '#a855f7';
-                ctx.lineWidth = 3;
-                globalOptPoints.forEach((pt, idx) => {
-                    const p = leafletMapInstance.latLngToContainerPoint([pt[0], pt[1]]);
-                    if (idx === 0) ctx.moveTo(p.x, p.y);
-                    else ctx.lineTo(p.x, p.y);
-                });
-                ctx.stroke();
-            }
-
-            turnpoints.forEach((tp, idx) => {
-                const p = leafletMapInstance.latLngToContainerPoint([tp.waypoint.lat, tp.waypoint.lon]);
-                ctx.font = 'bold 12px "Helvetica Neue", Arial';
-                ctx.fillStyle = '#000000';
-                ctx.textAlign = 'center';
-                
-                ctx.fillStyle = '#ffffff';
-                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x - 1, p.y - 9);
-                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x + 1, p.y - 9);
-                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x, p.y - 10);
-                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x, p.y - 8);
-
-                ctx.fillStyle = '#000000';
-                ctx.fillText(`${idx + 1}. ${tp.waypoint.name}`, p.x, p.y - 9);
-            });
-
-            return captureCanvas;
-        }
-
-        function removeCanvasVectorialAfterCapture() {
-            const captureCanvas = document.getElementById('mapCaptureCanvasOverlay');
-            if (captureCanvas) {
-                captureCanvas.remove();
-            }
         }
 
         async function generarTaulerGrafic() {
@@ -874,15 +778,11 @@
         }
 
         async function generarCanvasTablero() {
-            overlayCanvasVectorialBeforeCapture();
-            
             const canvas = await html2canvas(document.getElementById('captureArea'), {
                 useCORS: true,
                 allowTaint: true,
                 scale: 2
             });
-
-            removeCanvasVectorialAfterCapture();
             return canvas;
         }
 
@@ -901,7 +801,11 @@
         function compartirImagenWhatsApp() {
             let btn = document.getElementById('btnWA');
             btn.innerText = "⏳...";
-            
+
+            const codi = document.getElementById('taskCodeInput').value.trim().toUpperCase();
+            const link = `https://tools.xcontest.org/xctsk/load?taskCode=${codi}`;
+            const textoCompartir = `Aquí teniu el tauler de la ${document.getElementById('ligaInput').value}.\n\nCODI: ${codi}\nLINK: ${link}`;
+
             generarCanvasTablero().then(canvas => {
                 canvas.toBlob(async (blob) => {
                     const file = new File([blob], nombreArchivoGlobal, { type: 'image/png' });
@@ -911,7 +815,7 @@
                             await navigator.share({
                                 files: [file],
                                 title: 'Tauler de Màniga',
-                                text: 'Aquí teniu el tauler de la ' + document.getElementById('ligaInput').value + '.'
+                                text: textoCompartir
                             });
                         } catch (err) {
                             descargarComoAlternativa();
